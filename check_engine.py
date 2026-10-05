@@ -20,3 +20,7 @@ if not x.empty:
 for z in za+zb:assert z.half>=.01
 print('PASS: phase boundaries, timing prefix invariance, replay prefix invariance, geometry floor')
 print('Synthetic events:',len(y),'(verification only; no market evidence)')
+from pine_numeric import pine_cmp
+assert not pine_cmp(9.494399999999985,9.4944,'Lt')
+assert pine_cmp(0.1+0.2,0.3,'Eq')
+print('PASS: Pine comparison rounding at zone spacing boundary')

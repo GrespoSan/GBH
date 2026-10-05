@@ -44,4 +44,4 @@ check_engine.py verifica confini di fase, stabilità dei valori di timing su pre
 3. Definire l'avvio della sessione per il confronto persistent. Per snapshot restart usare un riferimento Pine ricalcolato da zero alla data scelta.
 4. Solo dopo la parità, eseguire 2–3 anni sull'universo verificato e integrare il modulo nell'app principale.
 
-Non sono stati scaricati né testati tre anni reali di dati: il pacchetto implementa il replay, ma non contiene risultati statistici V12 validati.
+Sono stati testati i CSV reali PRY forniti dall’utente; vedere VERIFICA_PRY.md. Non sono stati scaricati tre anni sull’intero universo e non sono disponibili risultati statistici V12 integralmente validati.
