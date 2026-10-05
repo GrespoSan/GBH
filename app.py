@@ -9,7 +9,7 @@ st.warning('Versione sperimentale: port Python implementato, equivalenza con sna
 st.caption('Daily chiuse • 400 barre di lookback • AUTO ROBUST BOUNDED • Hull 16 / memoria 3 • HA • distanza ≤ 1,50 ATR')
 mode=st.selectbox('Inizializzazione Balance',['restart','persistent'],format_func=lambda x:'Scansione da zero a ogni data' if x=='restart' else 'Replay continuo con memoria delle zone')
 st.caption('Il Pine usa barstate.islast: lo storico effettivo degli alert dipende dall’avvio e dalla persistenza della sessione. Confrontare entrambi i modi.')
-start=st.date_input('Prima data da analizzare',value=pd.Timestamp('2023-10-01'))
+start=st.date_input('Prima data da analizzare',value=pd.Timestamp('2026-06-01'))
 source=st.radio('Prezzi',['CSV Daily','Yahoo'])
 frames={}
 if source=='CSV Daily':
@@ -18,7 +18,13 @@ if source=='CSV Daily':
         try:
             d=pd.read_csv(f);d.columns=d.columns.str.lower()
             key='date' if 'date' in d else 'time'
-            d.index=pd.to_datetime(d.pop(key));frames[f.name.rsplit('.',1)[0]]=d.loc[d.index.normalize()<pd.Timestamp.now(tz='Europe/Rome').tz_localize(None).normalize()]
+            raw_date=d.pop(key)
+            if pd.api.types.is_numeric_dtype(raw_date):
+                unit='ms' if raw_date.abs().median()>1e11 else 's'
+                d.index=pd.to_datetime(raw_date,unit=unit,utc=True).dt.tz_convert('Europe/Rome').dt.tz_localize(None).dt.normalize()
+            else:
+                d.index=pd.to_datetime(raw_date).dt.normalize()
+            frames[f.name.rsplit('.',1)[0]]=d.loc[d.index.normalize()<pd.Timestamp.now(tz='Europe/Rome').tz_localize(None).normalize()]
         except Exception as e:st.error(f'{f.name}: {e}')
 else:
     from pathlib import Path
