@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pandas as pd
 from core import wilder_atr, _evaluate_compatible, _evaluate_independent, BalanceZone, _normalize_ohlc
+from fast_compatible import evaluate as _evaluate_compatible, future_extremes
 PHASES = {'EARLY', 'FRESH', 'TRANSITION'}
 
 def phase(signal, trend, mem, ha, inv, seq):
@@ -96,10 +97,11 @@ def zones(d, atr, valid, engine, old, tick):
     rng = max(window.high.max() - lo, tick * 10)
     moves = np.abs(np.diff(d.close.iloc[max(0, n - scan):n].to_numpy()))
     discovery = max(tick, float(np.median(moves)))
+    future_min, future_max = future_extremes(d.close.to_numpy(float), valid)
     candidates = []
     for pct in range(101):
         center = lo + rng * pct / 100
-        stats = _evaluate_compatible(d, center, discovery, scan, 1, valid)
+        stats = _evaluate_compatible(d, center, discovery, scan, 1, valid, future_min=future_min, future_max=future_max)
         if pine_cmp(stats[2], 1, 'GtE'):
             candidates.append((center, stats[-1]))
     chosen = []
@@ -111,7 +113,7 @@ def zones(d, atr, valid, engine, old, tick):
         if any((pine_cmp(round(float(abs(center - z.center)), 9), round(float(spacing), 9), 'Lt') for z in chosen)):
             return
         half = auto_half(d, atr, center, discovery, valid, scan, tick)
-        sup, res, hits, dwell, age, strength = _evaluate_compatible(d, center, half, scan, 1, valid)
+        sup, res, hits, dwell, age, strength = _evaluate_compatible(d, center, half, scan, 1, valid, future_min=future_min, future_max=future_max)
         tests, succ, ss, rs, br, rel = _evaluate_independent(d, atr, center, half, scan, 1, valid, tick)
         chosen.append(BalanceZone(center, half, 100 * (center - lo) / rng, strength, hits, sup, res, dwell, age, tests, succ, ss, rs, br, rel, engine))
         used.add(k)
@@ -174,6 +176,14 @@ def replay(data, ticker, start=None, mode='restart', tick=0.0001, progress=None)
     for i in range(60, len(d)):
         if mode == 'restart' and start is not None and d.index[i] < pd.Timestamp(start):
             continue
+        state = t.iloc[i].to_dict()
+        ph = phase(state['HS'], state['HT'], state['MEM'], state['HA'], state['INV'], state['SEQ'])
+        # Restart has no retained zones. Non-target phases cannot emit events.
+        # Persistent must still update zones on every session.
+        if mode == 'restart' and ph not in PHASES:
+            if progress:
+                progress(i, len(d))
+            continue
         if pine_cmp(mode, 'restart', 'Eq'):
             a = []
             b = []
@@ -184,8 +194,6 @@ def replay(data, ticker, start=None, mode='restart', tick=0.0001, progress=None)
             continue
         if snap is None:
             continue
-        state = t.iloc[i].to_dict()
-        ph = phase(state['HS'], state['HT'], state['MEM'], state['HA'], state['INV'], state['SEQ'])
         if ph not in PHASES or pine_cmp(snap['DIST'], 1.5, 'Gt'):
             continue
         row = dict(Date=d.index[i], Ticker=ticker, PHASE=ph, Close=d.close.iloc[i], **snap, **state)

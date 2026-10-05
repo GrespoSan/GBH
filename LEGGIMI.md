@@ -1,28 +1,55 @@
-# Verifica del passaggio ATR nel Radar V12
+# GBH V12 — modulo storico sperimentale
 
-La diagnostica v0.2 restituisce per PRY / Daily CLOSED 2 ottobre 2026:
-- HALF usata dalla zona: 1,38
-- 4 campioni geometrici (offset 15,39,49,114)
-- mediana: 0,20726859
-- MAD: 0,05293020
-- HALF robusta prima del limite: 1,35204629
+Avvio da terminale, nella cartella estratta:
 
-I campioni, la mediana, il MAD e la HALF robusta coincidono con Python. La discordanza rimane tra il calcolo diretto e il valore incorporato nella zona dal percorso f_buildZoneV → f_autoHalf.
+    pip install -r requirements.txt
+    streamlit run app.py
 
-Ipotesi tecnica da verificare: l'ATR storico è passato come parametro series attraverso funzioni annidate richiamate nei blocchi barstate.islast. I parametri Pine possiedono buffer locali di storia che possono risultare incompleti se le chiamate non sono eseguite su ogni barra.
-Fonte ufficiale: https://www.tradingview.com/pine-script-docs/language/execution-model/
+È un modulo separato: l'app v4.6 non viene modificata finché non è verificata la parità del nuovo motore.
 
-La variante proposta copia gli ATR degli offset necessari in un array, direttamente nel contesto motore che calcola ta.atr su ogni barra. f_autoHalf, f_buildZoneV e f_evaluateIndependentV ricevono quell'array e leggono i valori con array.get. Parametri, soglie, ranking, definizioni di fase e formula robusta restano uguali. La disponibilità dello storico ATR può modificare HALF e reliability, quindi anche la zona selezionata.
+## Audit delle fonti
 
-Non è stata eseguita compilazione Pine nel workspace; il confronto TradingView resta necessario.
+Fonti recuperate: Radar ITA1 e ITA2 v1.2 CLOSED OPEN SLOPE RET12 CONNECTOR del 28 settembre 2026; Streamlit v4.6 rebuild.
 
-## Passo immediato
+Differenze accertate:
+- Il Radar V12 usa Discovery = mediana delle variazioni assolute close-close, e geometria AUTO ROBUST BOUNDED (minimo 3 campioni, MAD × 1,4826, massimo Discovery). Streamlit v4.6 usa ATR fisso 0,20.
+- Nel Pine i blocchi Balance e selezione della riga sono subordinati a barstate.islast. Le zone non vengono ricostruite storicamente barra per barra durante il caricamento. La memoria dipende dalla vita della sessione; non esiste un unico storico degli alert ricavabile dai soli OHLC senza definire l'inizializzazione.
+- Il modulo offre restart (scansione da zero) e persistent (scansione ogni seduta con retention). Entrambi sono esperimenti definiti: nessuno ricostruisce automaticamente la sessione realmente avvenuta.
+- In CLOSED, HA T-1 corrisponde alla stessa seduta sorgente del prezzo/Hull, senza applicare un ulteriore ritardo in Python.
+- RET12 è (Close della seduta precedente alla sorgente − Close 13 barre prima della sorgente)/ATR della sorgente. Non è Close sorgente contro Close sorgente−12.
+- V12 seleziona una riga per titolo tramite score tocchi/strength/reliability; prima Structural A poi Reaction B senza sovrapposizione. Fase e distanza sono filtri successivi.
 
-Aprire GBH_V12_AUDIT_PRY_v0_3_ATR_BUFFER_FIX.pine nel Pine Editor e aggiungerlo come nuovo indicatore diagnostico. Default PRY e Daily CLOSED. Non sostituire ancora i Radar operativi e non modificare gli alert.
+## Regole congelate nel prototipo
 
-Per la seduta sorgente 2026-10-02, l'esito Python atteso è:
-BAL 128,7668; HALF 1,3520462861; bordo inferiore 127,4147537139; 2/3 tocchi; LOW/HIGH 0/2; A; ACTIVE; RESISTANCE TEST; FRESH; Hull LONG/BULL MEM0; HA verde SEQ4.
+Daily CLOSED, lookback 400, scan 1%, massimo 9 zone per motore, validation A=10 / B=5, break Close, cooldown 6, reazione 0,20 ATR, spacing 8% range, retention strength 25/tolleranza 1,5 step. Hull HMA16, memoria 3; HA ricorsiva; filtro tocchi almeno 2/3, ultima chiusura dentro non obbligatoria; EARLY/FRESH/TRANSITION e distanza dal bordo ≤1,50 ATR. SLOPE/RET12 restano osservativi.
 
-Se questi valori coincidono, il passaggio ATR esplicito risolve l'incoerenza su questo caso. Restano ulteriori date e titoli per concludere la validazione del port e definire il comportamento della retention nel replay.
+Il minimo tick è un input del test: va impostato correttamente per ciascun titolo. L'elenco contiene 78 simboli distinti dei Pine; il suffisso .MI è una prima mappatura meccanica, non una verifica delle identità Yahoo. Simboli cessati/rinominati vanno verificati senza sostituzioni arbitrarie.
 
-Le due copie ITA1/ITA2 v1.2.1 sono proposte da verificare, non sostituzioni automatiche. Il DATA BRIDGE è disabilitato di default in queste copie. V=12 rimane la versione del formato messaggio; il motore corretto va distinto dal vecchio negli studi e negli alert.
+## Misure e limiti
+
+CloseRet: rendimento dalla chiusura sorgente. OpenRet: rendimento dall'apertura della seduta successiva alla chiusura del giorno +N. MFE/MAE: massimo High/minimo Low delle N sedute successive, rispetto all'apertura successiva; valori firmati, non troncati a zero. Orizzonti incompleti vuoti. Commissioni/slippage esclusi.
+
+Gli snapshot ripetuti non sono trade indipendenti. L'opzione inizio episodio è esplorativa: cambio fase o intervallo calendario >4 giorni, non deduplica esattamente gli alert. Confrontare prima statistiche per titolo e periodo; non interpretare percentuali grezze come prova di un vantaggio. Universo attuale: survivorship bias. Prezzi Yahoo possono differire da TradingView per rettifiche e provider.
+
+La seduta odierna è esclusa conservativamente. Caricare almeno 400 barre precedenti al test, preferibilmente 900 giorni di calendario. Il replay dispone di scansione vettoriale, filtro anticipato delle fasi nel modo restart e cache per dati/parametri identici.
+
+## Verifica eseguita
+
+check_engine.py verifica confini di fase, stabilità dei valori di timing su prefissi, invariabilità dei segnali di replay aggiungendo futuro e minimo tick. Dati sintetici usati esclusivamente per controllare il codice, non per misurare performance di mercato.
+
+## Verifica ancora necessaria
+
+1. Usare CSV Daily TradingView di un titolo e il minimo tick esatto.
+2. Confrontare almeno 10 snapshot storici concordati: BAL/HALF, tocchi, profilo, motore, Hull HS/HT/MEM, HA INV/SEQ, SLOPE/RET12 e fase.
+3. Definire l'avvio della sessione per il confronto persistent. Per snapshot restart usare un riferimento Pine ricalcolato da zero alla data scelta.
+4. Solo dopo la parità, eseguire 2–3 anni sull'universo verificato e integrare il modulo nell'app principale.
+
+Sono stati testati i CSV reali PRY forniti dall’utente; vedere VERIFICA_PRY.md. Non sono stati scaricati tre anni sull’intero universo e non sono disponibili risultati statistici V12 integralmente validati.
+
+## Aggiornamento v0.1.3 — velocità e validazione
+
+PRY, ISP, ELN ed ENI coincidono con la diagnostica Pine corretta (ATR storico in array) sulla seduta 2 ottobre 2026. Il confronto completo dello storico resta aperto. Il motore originale può differire da quello corretto. Vedi VERIFICA_4_TITOLI.md.
+
+La scansione compatibile usa array NumPy e riutilizza min/max delle finestre di validazione. Nel modo restart i giorni con fasi fuori EARLY/FRESH/TRANSITION vengono saltati prima della scansione; nel modo persistent tutte le zone sono aggiornate su ogni seduta. Nessuna riduzione di lookback, griglia, regole o universo. La cache Streamlit riutilizza solo risultati con gli stessi dati, titolo, data iniziale, modo e tick; dati nuovi generano una nuova elaborazione. Il progresso indica i titoli completati.
+
+Per aggiornare: estrarre il pacchetto completo, entrare nella cartella gbh_backtest e avviare streamlit run app.py. Non servono nuove dipendenze rispetto alla v0.1.2.

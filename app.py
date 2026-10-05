@@ -2,10 +2,15 @@ import io
 import zipfile
 import pandas as pd
 import streamlit as st
+from time import perf_counter
 from engine import replay
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def cached_replay(data, ticker, start, mode, tick):
+    return replay(data, ticker, start, mode, tick)
 st.set_page_config(page_title='GBH V12 storico',layout='wide')
 st.title('GBH V12 — test storico')
-st.warning('Versione sperimentale: port Python implementato, equivalenza con snapshot TradingView ancora da verificare. I risultati non sono un backtest V12 certificato.')
+st.warning('Versione sperimentale: confronto TradingView riuscito su PRY, ISP, ELN ed ENI al 2 ottobre 2026. La validazione dello storico completo resta aperta.')
 st.caption('Daily chiuse • 400 barre di lookback • AUTO ROBUST BOUNDED • Hull 16 / memoria 3 • HA • distanza ≤ 1,50 ATR')
 mode=st.selectbox('Inizializzazione Balance',['restart','persistent'],format_func=lambda x:'Scansione da zero a ogni data' if x=='restart' else 'Replay continuo con memoria delle zone')
 st.caption('Il Pine usa barstate.islast: lo storico effettivo degli alert dipende dall’avvio e dalla persistenza della sessione. Confrontare entrambi i modi.')
@@ -44,13 +49,17 @@ else:
 tick=st.number_input('Minimo tick per il lotto di test (specificare quello TradingView)',min_value=.000001,value=.0001,format='%.6f')
 st.caption('Per la prima validazione usare un titolo alla volta e il suo tick esatto. La seduta odierna è esclusa in modo conservativo da CSV e Yahoo. Servono almeno 400 barre precedenti al periodo del test.')
 if st.button('Esegui replay',disabled=not frames):
+    started=perf_counter()
     results=[];bar=st.progress(0)
-    for tk,d in frames.items():
+    for count,(tk,d) in enumerate(frames.items(),1):
         if len(d.loc[d.index<pd.Timestamp(start)])<400:st.warning(f'{tk}: meno di 400 barre prima del test; warm-up incompleto.')
         with st.spinner(f'Replay {tk}…'):
-            results.append(replay(d,tk,start,mode,tick,lambda i,n:bar.progress((i+1)/n)))
+            results.append(cached_replay(d,tk,start,mode,tick))
+        bar.progress(count/len(frames))
     st.session_state['events']=pd.concat(results,ignore_index=True) if results else pd.DataFrame()
+    st.session_state['elapsed']=perf_counter()-started
 if 'events' in st.session_state:
+    st.caption(f"Ultima esecuzione: {st.session_state.get('elapsed',0):.1f} secondi. I risultati con gli stessi dati e parametri vengono riutilizzati dalla cache.")
     events=st.session_state['events']
     if events.empty:st.info('Nessun evento nei dati forniti.')
     else:
